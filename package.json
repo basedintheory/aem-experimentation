@@ -11,7 +11,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/adobe/aem-experimentation.git"
+    "url": "git+ssh://git@github.com/basedintheory/aem-experimentation.git"
   },
   "author": "Adobe Inc.",
   "license": "Apache-2.0",
@@ -25,9 +25,9 @@
     "audiences"
   ],
   "bugs": {
-    "url": "https://github.com/adobe/aem-experimentation/issues"
+    "url": "https://github.com/basedintheory/aem-experimentation/issues"
   },
-  "homepage": "https://github.com/adobe/aem-experimentation#readme",
+  "homepage": "https://github.com/basedintheory/aem-experimentation#readme",
   "devDependencies": {
     "@babel/eslint-parser": "7.22.15",
     "@playwright/test": "1.44.0",
