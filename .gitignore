@@ -1,3 +1,56 @@
+node_modules/
+**/node_modules/
+tools/picker/dist/
+*.log
+*.env
+
+# IDE and Editor files
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Build and distribution
+dist/
+build/
+.cache/
+out/
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Environment and configuration
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.envrc
+
+# Coverage and testing
 coverage/
+.nyc_output/
+.coverage/
 playwright-report/
 test-results/
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Package manager files
+package-lock.json.backup
+
+# OMC
+.omc/

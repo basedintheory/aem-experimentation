@@ -1,0 +1,90 @@
+{
+  "title": "AEM Experimentation Plugin Setup",
+  "description": "Install and configure the AEM Experimentation plugin for content experimentation, A/B testing, and audience targeting.",
+  "tasks": [
+    {
+      "title": "Review plugin files and understand structure",
+      "description": "Review the plugin files installed under plugins/aem-experimentation/.\n\n1. Examine src/index.js to understand exported functions: runEager(), runLazy(), and configuration options\n2. Read instructions.md for full integration requirements and usage patterns\n3. Identify any dependencies or prerequisites for integration\n4. Document the expected configuration object structure",
+      "subtask_parent": "",
+      "priority": "high",
+      "subtasks": []
+    },
+    {
+      "title": "Add experimentation config and import to scripts.js",
+      "description": "Add experimentation configuration and conditional import to scripts/scripts.js.\n\n1. Add experimentationConfig object at the top of the file with:\n   - prodHost: placeholder value (to be configured by user)\n   - audiences: empty map object for custom targeting functions\n2. Add conditional import logic that checks for experimentation metadata before loading the plugin:\n   - Check for <meta name=\"experiment\"> tag\n   - Check for <meta name=\"campaign\"> tag\n   - Check for decorated sections with experimentation attributes\n3. Import plugin from plugins/aem-experimentation/src/index.js only when metadata is detected",
+      "subtask_parent": "",
+      "priority": "high",
+      "subtasks": []
+    },
+    {
+      "title": "Integrate runEager into loadEager function",
+      "description": "Integrate the plugin's eager-phase logic into the loadEager() function in scripts/scripts.js.\n\n1. Call the plugin's runEager() function after the conditional import resolves\n2. Ensure this runs early in loadEager(), before loadLazy() is called\n3. This timing is critical to detect experiments and apply variant DOM changes before LCP\n4. Early execution minimizes layout shift and content flicker during variant swaps",
+      "subtask_parent": "",
+      "priority": "high",
+      "subtasks": []
+    },
+    {
+      "title": "Integrate showExperimentationOverlay into loadLazy function",
+      "description": "Add the experimentation debug overlay to the loadLazy() function in scripts/scripts.js.\n\n1. At the end of loadLazy(), call the plugin's lazy-phase function (showExperimentationOverlay)\n2. The overlay is a debug/authoring tool displaying active experiments and variants\n3. Overlay visibility is controlled by prodHost config - hidden on production, visible on non-prod origins\n4. Ensure the call is positioned after other lazy-loaded content to avoid blocking",
+      "subtask_parent": "",
+      "priority": "high",
+      "subtasks": []
+    },
+    {
+      "title": "Configure production hostname",
+      "description": "Set the experimentationConfig.prodHost value in scripts/scripts.js to match your production domain.\n\n1. Update prodHost to your production domain (e.g., 'www.mysite.com')\n2. This controls overlay visibility - debug pill is hidden on prod, shown on non-prod origins\n3. Alternative: Set isProd as a custom function if you have complex production detection logic\n4. Test that overlay appears on localhost/preview but not on the production domain",
+      "subtask_parent": "",
+      "priority": "medium",
+      "subtasks": []
+    },
+    {
+      "title": "Define audience targeting functions",
+      "description": "Add custom audience functions to experimentationConfig.audiences for targeted experiments.\n\n1. Each audience is a named function returning a boolean\n2. Common audience examples:\n   - mobile: () => window.innerWidth < 600\n   - desktop: () => window.innerWidth >= 600\n   - logged-in: () => !!document.cookie.match(/auth=/)\n3. Audiences are referenced in page metadata with: Experiment Audience: mobile\n4. Multiple audiences can be combined for complex targeting scenarios",
+      "subtask_parent": "",
+      "priority": "medium",
+      "subtasks": []
+    },
+    {
+      "title": "Configure advanced options (optional)",
+      "description": "Review and configure optional plugin settings in experimentationConfig as needed.\n\n1. storage: Custom object for session/sample storage implementation\n2. decorationFunction: Custom DOM redecoration function for fragment experiments\n3. Meta tag prefixes (if custom naming needed):\n   - audiencesMetaTagPrefix\n   - campaignsMetaTagPrefix\n   - experimentsMetaTagPrefix\n4. Query parameter customization:\n   - audiencesQueryParameter\n   - campaignsQueryParameter\n   - experimentsQueryParameter",
+      "subtask_parent": "",
+      "priority": "low",
+      "subtasks": []
+    },
+    {
+      "title": "Add RUM sampling configuration for experiment pages",
+      "description": "Add RUM sampling rate override in head.html for experiment pages.\n\n1. Add inline <script> block before the aem.js script load in head.html\n2. Script should check for experiment metadata on the page\n3. If experiment metadata is present, set window.RUM_SAMPLING_RATE = 10\n4. This increases sampling from 1-in-100 to 1-in-10 for better experiment data collection\n5. Critical for lower-traffic pages to ensure sufficient statistical significance",
+      "subtask_parent": "",
+      "priority": "medium",
+      "subtasks": []
+    },
+    {
+      "title": "Configure consent management (optional)",
+      "description": "Integrate consent management platform (CMP) with experimentation if required.\n\n1. If using OneTrust, Cookiebot, or similar CMP, integrate consent gating\n2. Call the plugin's updateUserConsent(true) in your CMP callback when user grants tracking consent\n3. Add metadata to experiments requiring consent: Experiment Requires Consent: true\n4. Experiments with consent requirement will not activate until consent is granted\n5. Review your privacy policy requirements to determine which experiments need consent gating",
+      "subtask_parent": "",
+      "priority": "low",
+      "subtasks": []
+    },
+    {
+      "title": "Commit instrumentation changes",
+      "description": "Stage and commit all plugin instrumentation changes to the feature branch.\n\n1. Stage modified files: scripts/scripts.js, head.html\n2. Commit with message: \"Instrument AEM Experimentation plugin\"\n3. Push to the plugin/aem-experimentation branch\n4. Ensure all changes follow project coding conventions",
+      "subtask_parent": "",
+      "priority": "high",
+      "subtasks": []
+    },
+    {
+      "title": "Review and merge plugin branch",
+      "description": "Review all changes and merge the plugin branch into the default branch.\n\n1. Review all changes on the plugin/aem-experimentation branch\n2. Create a pull request to merge into the default branch (main)\n3. Verify code quality and integration completeness\n4. After merging, verify the experimentation debug overlay pill:\n   - Appears on localhost and non-prod preview URLs\n   - Is hidden on the production domain\n5. Check browser console for any errors during plugin initialization",
+      "subtask_parent": "",
+      "priority": "high",
+      "subtasks": []
+    },
+    {
+      "title": "Create and test first experiment",
+      "description": "Set up and validate a test experiment to confirm the integration works correctly.\n\n1. Add experiment metadata to a content page:\n   - Experiment: (experiment name/ID)\n   - Experiment Variants: (comma-separated URLs to variant pages)\n   - Experiment Split: (optional traffic percentages, e.g., '50/50')\n2. Preview the page on a non-prod URL\n3. Verify:\n   - Experiment activates correctly\n   - Variant pages load as expected\n   - Debug overlay shows active experiment details\n   - RUM events are being captured\n4. Test variant switching using query parameters if supported",
+      "subtask_parent": "",
+      "priority": "medium",
+      "subtasks": []
+    }
+  ]
+}
