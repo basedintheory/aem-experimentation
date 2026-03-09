@@ -7,6 +7,7 @@
       "description": "Review the plugin files installed under plugins/aem-experimentation/.\n\n1. Examine src/index.js to understand exported functions: runEager(), runLazy(), and configuration options\n2. Read instructions.md for full integration requirements and usage patterns\n3. Identify any dependencies or prerequisites for integration\n4. Document the expected configuration object structure",
       "subtask_parent": "",
       "priority": "high",
+      "assignee": "agent:system",
       "subtasks": []
     },
     {
@@ -14,6 +15,7 @@
       "description": "Add experimentation configuration and conditional import to scripts/scripts.js.\n\n1. Add experimentationConfig object at the top of the file with:\n   - prodHost: placeholder value (to be configured by user)\n   - audiences: empty map object for custom targeting functions\n2. Add conditional import logic that checks for experimentation metadata before loading the plugin:\n   - Check for <meta name=\"experiment\"> tag\n   - Check for <meta name=\"campaign\"> tag\n   - Check for decorated sections with experimentation attributes\n3. Import plugin from plugins/aem-experimentation/src/index.js only when metadata is detected",
       "subtask_parent": "",
       "priority": "high",
+      "assignee": "agent:system",
       "subtasks": []
     },
     {
@@ -21,6 +23,7 @@
       "description": "Integrate the plugin's eager-phase logic into the loadEager() function in scripts/scripts.js.\n\n1. Call the plugin's runEager() function after the conditional import resolves\n2. Ensure this runs early in loadEager(), before loadLazy() is called\n3. This timing is critical to detect experiments and apply variant DOM changes before LCP\n4. Early execution minimizes layout shift and content flicker during variant swaps",
       "subtask_parent": "",
       "priority": "high",
+      "assignee": "agent:system",
       "subtasks": []
     },
     {
@@ -28,6 +31,7 @@
       "description": "Add the experimentation debug overlay to the loadLazy() function in scripts/scripts.js.\n\n1. At the end of loadLazy(), call the plugin's lazy-phase function (showExperimentationOverlay)\n2. The overlay is a debug/authoring tool displaying active experiments and variants\n3. Overlay visibility is controlled by prodHost config - hidden on production, visible on non-prod origins\n4. Ensure the call is positioned after other lazy-loaded content to avoid blocking",
       "subtask_parent": "",
       "priority": "high",
+      "assignee": "agent:system",
       "subtasks": []
     },
     {
@@ -56,6 +60,7 @@
       "description": "Add RUM sampling rate override in head.html for experiment pages.\n\n1. Add inline <script> block before the aem.js script load in head.html\n2. Script should check for experiment metadata on the page\n3. If experiment metadata is present, set window.RUM_SAMPLING_RATE = 10\n4. This increases sampling from 1-in-100 to 1-in-10 for better experiment data collection\n5. Critical for lower-traffic pages to ensure sufficient statistical significance",
       "subtask_parent": "",
       "priority": "medium",
+      "assignee": "agent:system",
       "subtasks": []
     },
     {
@@ -70,6 +75,7 @@
       "description": "Stage and commit all plugin instrumentation changes to the feature branch.\n\n1. Stage modified files: scripts/scripts.js, head.html\n2. Commit with message: \"Instrument AEM Experimentation plugin\"\n3. Push to the plugin/aem-experimentation branch\n4. Ensure all changes follow project coding conventions",
       "subtask_parent": "",
       "priority": "high",
+      "assignee": "agent:system",
       "subtasks": []
     },
     {
@@ -77,6 +83,7 @@
       "description": "Review all changes and merge the plugin branch into the default branch.\n\n1. Review all changes on the plugin/aem-experimentation branch\n2. Create a pull request to merge into the default branch (main)\n3. Verify code quality and integration completeness\n4. After merging, verify the experimentation debug overlay pill:\n   - Appears on localhost and non-prod preview URLs\n   - Is hidden on the production domain\n5. Check browser console for any errors during plugin initialization",
       "subtask_parent": "",
       "priority": "high",
+      "assignee": "agent:system",
       "subtasks": []
     },
     {
