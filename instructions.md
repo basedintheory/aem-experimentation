@@ -10,7 +10,16 @@ The AEM Experimentation plugin provides three content personalization features f
 
 All three features are metadata-driven. Authors configure experiments, audiences, and campaigns in their page's metadata block in the document. The plugin reads these meta tags at runtime, resolves the appropriate variant, and swaps content before the page renders.
 
-The plugin files are pre-installed at `plugins/experimentation/`. Do **not** modify any files inside that directory. You will only modify files in `scripts/` and `head.html`.
+The plugin files are pre-installed at `plugins/experimentation/`. Do **not** modify any files inside that directory. You will only add or modify files in `scripts/` and `head.html`.
+
+---
+
+## Key Files to Add or Modify
+
+1. **plugins/experimentation** — Already installed via git subtree. Do not modify.
+2. **scripts/experiment-loader.js** — New file. Handles experimentation detection and eager loading.
+3. **scripts/scripts.js** — Modify to add configuration and call the experiment loader.
+4. **head.html** — Modify to add modulepreload hint and optional RUM sampling override.
 
 ---
 
@@ -18,18 +27,15 @@ The plugin files are pre-installed at `plugins/experimentation/`. Do **not** mod
 
 The plugin entry point is `plugins/experimentation/src/index.js`. It exports:
 
-### `loadEager(document, options, context)`
-Main initialization function. Must be called during the eager phase of page loading (before LCP). This function:
+### `loadEager(document, config)`
+Main initialization function. Called via the experiment loader during the eager phase of page loading (before LCP). This function:
 - Adjusts RUM sampling rates for experiment/campaign/audience pages
 - Runs campaign detection (checks `?campaign=` or `?utm_campaign=` query params)
 - If no campaign matched, runs experiment detection (checks `experiment` meta tag)
 - If no experiment matched, runs audience targeting (checks `audience:*` meta tags)
 - Swaps page content with the resolved variant if applicable
 
-### `loadLazy(document, options, context)`
-Deferred work. Loads the preview overlay UI on non-production domains (localhost, `*.hlx.page`, `*.hlx.stage`). Should be called at the end of the lazy phase.
-
-### Options object
+### Config object
 
 ```js
 {
@@ -38,47 +44,27 @@ Deferred work. Loads the preview overlay UI on non-production domains (localhost
   prodHost: 'www.example.com',
 
   // Alternative: a function that returns true on prod environments
-  // isProd: () => window.location.hostname === 'www.example.com',
+  // isProd: () => !window.location.hostname.endsWith('hlx.page')
+  //   && window.location.hostname !== 'localhost',
 
-  // Audience resolver map. Keys are audience names (kebab-case),
-  // values are async functions returning boolean.
-  audiences: {},
-
-  // RUM sampling rate (default: 10, meaning 1-in-10).
-  // Only applies to experiment/campaign/audience pages.
-  rumSamplingRate: 10,
-
-  // Storage backend for variant stickiness (default: window.sessionStorage)
-  // Use window.localStorage for cross-session persistence.
+  // the storage type used to persist data between page views
+  // (for instance to remember what variant in an experiment the user was served)
   // storage: window.sessionStorage,
 
-  // Meta tag and query parameter names (defaults shown):
-  experimentsMetaTag: 'experiment',
-  experimentsQueryParameter: 'experiment',
+  // Audience resolver map. Keys are audience names (kebab-case),
+  // values are functions returning boolean.
+  audiences: {},
+
+  // Meta tag prefixes (defaults shown):
   audiencesMetaTagPrefix: 'audience',
   audiencesQueryParameter: 'audience',
   campaignsMetaTagPrefix: 'campaign',
   campaignsQueryParameter: 'campaign',
+  experimentsMetaTagPrefix: 'experiment',
+  experimentsQueryParameter: 'experiment',
 
-  // Experiment manifest location defaults:
-  experimentsRoot: '/experiments',
-  experimentsConfigFile: 'manifest.json',
-}
-```
-
-### Context object
-
-The plugin requires a `context` object with these methods from the project's `aem.js`/`lib-franklin.js`:
-
-```js
-{
-  getAllMetadata,  // (scope: string) => Record<string, string>
-  getMetadata,     // (name: string) => string
-  loadCSS,         // (path: string) => Promise<void>
-  loadScript,      // (path: string) => Promise<void>
-  sampleRUM,       // (checkpoint: string, data?: object) => void
-  toCamelCase,     // (str: string) => string
-  toClassName,     // (str: string) => string
+  // Fragment experiment redecoration function (optional):
+  // decorationFunction: (el) => { buildBlock(el); decorateBlock(el); },
 }
 ```
 
@@ -86,137 +72,145 @@ The plugin requires a `context` object with these methods from the project's `ae
 
 ## Integration Steps
 
-### Step 1: Add `getAllMetadata` helper to `scripts/scripts.js`
+### Step 1: Create `scripts/experiment-loader.js`
 
-Check if the project already has a `getAllMetadata` function. If not, add it near the top of `scripts/scripts.js`:
+Create a new file `scripts/experiment-loader.js` with the following content:
 
 ```js
 /**
- * Gets all the metadata elements that are in the given scope.
- * @param {String} scope The scope/prefix for the metadata
- * @returns an object with the metadata key-value pairs for the given scope
+ * Checks if experimentation is enabled.
+ * @returns {boolean} True if experimentation is enabled, false otherwise.
  */
-export function getAllMetadata(scope) {
-  return [...document.head.querySelectorAll(`meta[property^="${scope}:"],meta[name^="${scope}-"]`)]
-    .reduce((res, meta) => {
-      const id = toClassName(meta.name
-        ? meta.name.substring(scope.length + 1)
-        : meta.getAttribute('property').split(':')[1]);
-      res[id] = meta.getAttribute('content');
-      return res;
-    }, {});
+const isExperimentationEnabled = () => document.head.querySelector('[name^="experiment"],[name^="campaign-"],[name^="audience-"],[property^="campaign:"],[property^="audience:"]')
+  || [...document.querySelectorAll('.section-metadata div')].some((d) => d.textContent.match(/Experiment|Campaign|Audience/i));
+
+/**
+ * Loads the experimentation module (eager).
+ * @param {Document} document The document object.
+ * @param {Object} config The experimentation configuration.
+ * @returns {Promise<void>} A promise that resolves when the experimentation module is loaded.
+ */
+export async function runExperimentation(document, config) {
+  if (!isExperimentationEnabled()) {
+    window.addEventListener('message', async (event) => {
+      if (event.data?.type === 'hlx:experimentation-get-config') {
+        event.source.postMessage({
+          type: 'hlx:experimentation-config',
+          config: { experiments: [], audiences: [], campaigns: [] },
+          source: 'no-experiments'
+        }, '*');
+      }
+    });
+    return null;
+  }
+
+  try {
+    const { loadEager } = await import(
+      '../plugins/experimentation/src/index.js'
+    );
+    return loadEager(document, config);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to load experimentation module (eager):', error);
+    return null;
+  }
 }
 ```
 
-Also ensure these imports exist at the top of `scripts/scripts.js` (from `aem.js` or `lib-franklin.js`):
+This file:
+- Detects experimentation metadata via DOM queries (meta tags and section-metadata divs)
+- Only imports the plugin when experimentation is actually enabled on the page
+- Handles the sidekick/overlay communication when no experiments are present
+- Wraps the import in a try/catch for resilience
+
+### Step 2: Update `scripts/scripts.js`
+
+Add the following import and configuration at the top of `scripts/scripts.js`:
 
 ```js
 import {
-  getMetadata,
-  loadCSS,
-  loadScript,
-  sampleRUM,
-  toCamelCase,
-  toClassName,
-} from './aem.js';
-```
-
-> **Note:** The exact import source depends on the project. Some projects use `lib-franklin.js` instead of `aem.js`. Check which file exists in the `scripts/` directory.
-
-### Step 2: Define the experimentation config and plugin context
-
-Add the following near the top of `scripts/scripts.js`, after imports:
-
-```js
-const AUDIENCES = {
-  mobile: () => window.innerWidth < 600,
-  desktop: () => window.innerWidth >= 600,
-  // Add project-specific audiences here
-};
+  runExperimentation,
+} from './experiment-loader.js';
 
 const experimentationConfig = {
   prodHost: 'PUT_PROD_HOSTNAME_HERE',
-  audiences: AUDIENCES,
-};
-
-const pluginContext = {
-  getAllMetadata,
-  getMetadata,
-  loadCSS,
-  loadScript,
-  sampleRUM,
-  toCamelCase,
-  toClassName,
+  audiences: {
+    mobile: () => window.innerWidth < 600,
+    desktop: () => window.innerWidth >= 600,
+    // define your custom audiences here as needed
+  },
 };
 ```
 
-Replace `'PUT_PROD_HOSTNAME_HERE'` with the project's production hostname (e.g., `'www.example.com'`). If you cannot determine the production hostname, leave it as an empty string `''` — the preview overlay will show on all environments.
+Replace `'PUT_PROD_HOSTNAME_HERE'` with the project's production hostname (e.g., `'www.mysite.com'`). If you cannot determine the production hostname, leave it as an empty string `''` — the preview overlay will show on all environments.
 
-### Step 3: Call `loadEager` in the eager phase
-
-Find the `loadEager` function in `scripts/scripts.js`. Add the experimentation plugin call as early as possible inside it — before `loadHeader`, `loadFooter`, and `decorateBlocks` calls. The plugin must run before LCP because it may swap page content.
+Then, add the following line early in your `loadEager()` function — before `loadHeader`, `loadFooter`, and `decorateBlocks` calls. The plugin must run before LCP because it may swap page content:
 
 ```js
 async function loadEager(doc) {
   // ... existing early setup (decorateTemplatesAndThemes, etc.) ...
 
-  // Experimentation plugin — must run before blocks are decorated
-  if (getMetadata('experiment')
-    || Object.keys(getAllMetadata('campaign')).length
-    || Object.keys(getAllMetadata('audience')).length) {
-    const { loadEager: runEager } = await import('../plugins/experimentation/src/index.js');
-    await runEager(document, experimentationConfig, pluginContext);
-  }
+  await runExperimentation(doc, experimentationConfig);
 
   // ... existing loadHeader, decorateBlocks, waitForFirstImage, etc. ...
 }
 ```
 
-The conditional check avoids importing the plugin on pages that don't use experimentation, audiences, or campaigns.
+> **Note:** Unlike v1, there is no separate `loadLazy` call needed. The experiment loader and plugin handle both eager and lazy phases internally.
 
-### Step 4: Call `loadLazy` in the lazy phase
+### Step 3: Add modulepreload to `head.html`
 
-Find the `loadLazy` function in `scripts/scripts.js`. Add the experimentation lazy call at the **end** of the function:
-
-```js
-async function loadLazy(doc) {
-  // ... existing lazy loading code ...
-
-  // Experimentation preview overlay (non-prod only)
-  if (getMetadata('experiment')
-    || Object.keys(getAllMetadata('campaign')).length
-    || Object.keys(getAllMetadata('audience')).length) {
-    const { loadLazy: runLazy } = await import('../plugins/experimentation/src/index.js');
-    await runLazy(document, experimentationConfig, pluginContext);
-  }
-}
-```
-
-### Step 5: Add modulepreload to `head.html`
-
-Add a modulepreload link hint for the plugin in `head.html`. This tells the browser to start fetching the module early, reducing latency when the eager phase imports it:
+Add a modulepreload link hint for the experiment loader in `head.html`. This tells the browser to start fetching the module early, reducing latency when the eager phase imports it:
 
 ```html
-<link rel="modulepreload" href="/plugins/experimentation/src/index.js" />
+<link rel="modulepreload" href="/scripts/experiment-loader.js" />
 ```
 
 Add this line alongside the existing modulepreload links (typically after the `scripts/scripts.js` preload).
 
 ---
 
+## Increasing RUM Sampling Rate for Low-Traffic Pages
+
+When running experiments during short periods (a few days to 2 weeks) or on low-traffic pages (<100K page views a month), the default RUM sampling (1 out of 100) is unlikely to reach statistical significance. For those use cases, increase the sampling rate to 1 out of 10.
+
+Edit your `head.html` and add this inline script **before** the `aem.js` or `lib-franklin.js` script load:
+
+```html
+<!-- insert this script tag before loading aem.js or lib-franklin.js -->
+<script>
+  window.RUM_SAMPLING_RATE = document.head.querySelector('[name^="experiment"],[name^="campaign-"],[name^="audience-"]')
+    || [...document.querySelectorAll('.section-metadata div')].some((d) => d.textContent.match(/Experiment|Campaign|Audience/i))
+    ? 10
+    : 100;
+</script>
+<script type="module" src="/scripts/aem.js"></script>
+<script type="module" src="/scripts/scripts.js"></script>
+```
+
+Then verify your `aem.js` file around line 20 has:
+```js
+const weight = new URLSearchParams(window.location.search).get('rum') === 'on' ? 1 : defaultSamplingRate;
+```
+
+If this line is not present, apply the changes from: https://github.com/adobe/helix-rum-js/pull/159/files
+
+---
+
 ## Configuration Reference
 
 ### `prodHost` (string)
-The production hostname (e.g., `'www.example.com'`). When the current page's host matches this value, the preview overlay pill is hidden. Also used to scope RUM performance queries.
+The production hostname (e.g., `'www.mysite.com'`). When the current page's host matches this value, the preview overlay pill is hidden.
 
 ### `isProd` (function, optional)
 Alternative to `prodHost`. A function returning `true` when running on production. Use this for complex multi-domain setups:
 ```js
-isProd: () => window.location.hostname.endsWith('.com'),
+isProd: () => !window.location.hostname.endsWith('hlx.page')
+  && window.location.hostname !== 'localhost',
 ```
 
 ### `audiences` (object)
-A map of audience name strings to async boolean-returning functions. Keys must be kebab-case and match the audience names used in metadata. **No audiences are built-in — all must be defined by the project.** Example:
+A map of audience name strings to boolean-returning functions. Keys must be kebab-case and match the audience names used in metadata. **No audiences are built-in — all must be defined by the project.** Example:
 
 ```js
 {
@@ -231,14 +225,11 @@ A map of audience name strings to async boolean-returning functions. Keys must b
 }
 ```
 
-### `rumSamplingRate` (number, default: 10)
-Controls RUM sampling for experiment/campaign/audience pages. Default is `10` (1-in-10 page views). Minimum is `10` — you cannot set a more aggressive rate.
-
 ### `storage` (Storage, default: `window.sessionStorage`)
 The storage backend for persisting variant assignment across page navigations. Use `window.localStorage` if you want variant stickiness to survive browser restarts.
 
 ### Meta tag prefixes
-- `experimentsMetaTag` (default: `'experiment'`) — The meta tag name for experiment ID
+- `experimentsMetaTagPrefix` (default: `'experiment'`) — Prefix for experiment meta tags
 - `audiencesMetaTagPrefix` (default: `'audience'`) — Prefix for audience meta tags
 - `campaignsMetaTagPrefix` (default: `'campaign'`) — Prefix for campaign meta tags
 
@@ -246,6 +237,14 @@ The storage backend for persisting variant assignment across page navigations. U
 - `experimentsQueryParameter` (default: `'experiment'`) — Forces a specific experiment/variant via `?experiment=id/variant`
 - `audiencesQueryParameter` (default: `'audience'`) — Forces a specific audience via `?audience=mobile`
 - `campaignsQueryParameter` (default: `'campaign'`) — Forces a campaign via `?campaign=xmas` (also supports `?utm_campaign=`)
+
+### `decorationFunction` (function, optional)
+A function to redecorate DOM elements after fragment replacement. Fragment replacement is handled by an async observer which may execute before or after default decoration completes. Common cases:
+
+1. Element inside a block needs redecoration: `(el) => { buildBlock(el); decorateBlock(el); }`
+2. `.block` selector needs redecoration: switch block status to `"loading"` and call `loadBlock(el)`
+3. `.section` selector needs redecoration: call `decorateBlocks(el)`
+4. `main` selector needs redecoration: call `decorateMain(el)`
 
 ---
 
@@ -306,6 +305,7 @@ When campaigns resolve: `campaign-{campaign-name}` (e.g., `campaign-xmas`)
 | `Experiment Start Date`      | JS Date string, e.g. `2024-01-01`                 |
 | `Experiment End Date`        | JS Date string, e.g. `2024-03-31`                 |
 | `Experiment Conversion Name` | Custom conversion event name (default: `click`)   |
+| `Experiment Requires Consent`| `true` to require user consent before running      |
 
 ### Audience metadata
 
@@ -356,13 +356,58 @@ Only one feature can swap content per page load. If a campaign matches, experime
 
 ---
 
+## Extensibility & Integrations
+
+The plugin exposes experiment data through two mechanisms:
+1. **Events** — React immediately when experiments are applied
+2. **Global Objects** — Access complete experiment details after page load
+
+### Events
+
+Listen for the `aem:experimentation` event to react when experiments, campaigns, or audiences are applied:
+
+```js
+document.addEventListener('aem:experimentation', (event) => {
+  console.log(event.detail);
+  // event.detail contains: { type, element, experiment/campaign/audience, variant }
+});
+```
+
+### Global Objects
+
+```js
+const allExperiments = window.hlx.experiments; // array of page/section/fragment experiments
+const allAudiences = window.hlx.audiences;     // array of resolved audiences
+const allCampaigns = window.hlx.campaigns;     // array of resolved campaigns
+
+// backward compatibility with V1
+const experiment = window.hlx.experiment;
+const audience = window.hlx.audience;
+const campaign = window.hlx.campaign;
+```
+
+### Consent Management
+
+The plugin provides consent management APIs. Import from the plugin:
+
+```js
+import {
+  updateUserConsent,
+  isUserConsentGiven,
+} from '../plugins/experimentation/src/index.js';
+```
+
+Add `Experiment Requires Consent: true` metadata to experiments that need consent. Integrate your CMP (OneTrust, Cookiebot, or custom) to call `updateUserConsent(true/false)`. The recommended approach is to add consent initialization in `experiment-loader.js` before loading experimentation.
+
+---
+
 ## Important Notes
 
 - **Do not modify plugin files.** All files under `plugins/experimentation/` are managed upstream. Only modify project files in `scripts/`, `head.html`, and similar project-level locations.
-- **All audience functions are developer-defined.** The plugin ships with zero built-in audiences. The `AUDIENCES` map must be defined in project code.
-- **The plugin conditionally imports.** The `if (getMetadata(...))` guard ensures the plugin JS is only loaded on pages that actually use experimentation features. Do not remove this guard.
+- **All audience functions are developer-defined.** The plugin ships with zero built-in audiences. The `audiences` map must be defined in project code.
+- **The experiment loader conditionally imports.** The `isExperimentationEnabled()` check ensures the plugin JS is only loaded on pages that actually use experimentation features. Do not remove this guard.
 - **Bot detection is built in.** The plugin checks `navigator.userAgent` for bot/crawler patterns and skips all experimentation for bots.
 - **Content swapping uses `fetch` + `DOMParser`.** When a variant page is served, the plugin fetches the variant URL, parses it safely with DOMParser (no script execution), and replaces `<main>` innerHTML. This means blocks in the swapped content will still be decorated normally by the project's `loadBlocks` flow.
-- **`window.hlx.experiment`** is set globally when an experiment runs. It contains the full experiment config including `id`, `selectedVariant`, `status`, `variantNames`, `variants`, `resolvedAudiences`, and `run`. Similarly `window.hlx.campaign` and `window.hlx.audience` are set for their respective features.
+- **`window.hlx.experiments`** is set globally as an array of all page/section/fragment experiments. Similarly `window.hlx.audiences` and `window.hlx.campaigns`. V1-compatible `window.hlx.experiment`, `window.hlx.audience`, and `window.hlx.campaign` are also set.
 - **RUM tracking** happens automatically via `sampleRUM()` calls for checkpoints `experiment`, `campaign`, and `audiences`.
-- **Consent management:** If your project requires cookie consent, you can pass `storage: null` or a custom storage adapter. The default `sessionStorage` does not require consent in most jurisdictions since it doesn't persist beyond the session and doesn't identify users.
+- **Consent management:** Use `updateUserConsent()` and `isUserConsentGiven()` APIs with your CMP. Experiments can require consent via metadata. The default `sessionStorage` does not require consent in most jurisdictions.

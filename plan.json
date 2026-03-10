@@ -4,7 +4,15 @@
   "tasks": [
     {
       "title": "Review plugin files and understand structure",
-      "description": "Review the plugin files installed under plugins/aem-experimentation/.\n\n1. Examine src/index.js to understand exported functions: runEager(), runLazy(), and configuration options\n2. Read instructions.md for full integration requirements and usage patterns\n3. Identify any dependencies or prerequisites for integration\n4. Document the expected configuration object structure",
+      "description": "Review the plugin files installed under plugins/experimentation/.\n\n1. Examine src/index.js to understand exported functions: loadEager() and configuration options\n2. Read instructions.md for full integration requirements and usage patterns\n3. Identify any dependencies or prerequisites for integration\n4. Document the expected configuration object structure",
+      "subtask_parent": "",
+      "priority": "high",
+      "assignee": "agent:system",
+      "subtasks": []
+    },
+    {
+      "title": "Create scripts/experiment-loader.js",
+      "description": "Create a new file scripts/experiment-loader.js that handles experimentation detection and eager loading.\n\n1. Add isExperimentationEnabled() function that checks for experimentation metadata via DOM queries:\n   - meta tags: [name^=\"experiment\"], [name^=\"campaign-\"], [name^=\"audience-\"], [property^=\"campaign:\"], [property^=\"audience:\"]\n   - section-metadata divs containing Experiment, Campaign, or Audience text\n2. Add exported runExperimentation(document, config) async function that:\n   - Returns null early if experimentation is not enabled, but sets up a message listener for 'hlx:experimentation-get-config' to respond with empty config\n   - If enabled, dynamically imports loadEager from '../plugins/experimentation/src/index.js'\n   - Calls and returns loadEager(document, config)\n   - Wraps import in try/catch, logging errors to console\n3. Follow the exact code structure from the v2 README",
       "subtask_parent": "",
       "priority": "high",
       "assignee": "agent:system",
@@ -12,23 +20,23 @@
     },
     {
       "title": "Add experimentation config and import to scripts.js",
-      "description": "Add experimentation configuration and conditional import to scripts/scripts.js.\n\n1. Add experimentationConfig object at the top of the file with:\n   - prodHost: placeholder value (to be configured by user)\n   - audiences: empty map object for custom targeting functions\n2. Add conditional import logic that checks for experimentation metadata before loading the plugin:\n   - Check for <meta name=\"experiment\"> tag\n   - Check for <meta name=\"campaign\"> tag\n   - Check for decorated sections with experimentation attributes\n3. Import plugin from plugins/aem-experimentation/src/index.js only when metadata is detected",
+      "description": "Add experimentation configuration and experiment loader import to scripts/scripts.js.\n\n1. Add import at the top of the file:\n   import { runExperimentation } from './experiment-loader.js';\n2. Add experimentationConfig object after imports with:\n   - prodHost: placeholder value (to be configured by user)\n   - audiences: object with mobile and desktop functions as defaults\n3. Do NOT add a pluginContext object — v2 does not use one\n4. Do NOT add getAllMetadata or other helper functions — v2 detection is handled in experiment-loader.js",
       "subtask_parent": "",
       "priority": "high",
       "assignee": "agent:system",
       "subtasks": []
     },
     {
-      "title": "Integrate runEager into loadEager function",
-      "description": "Integrate the plugin's eager-phase logic into the loadEager() function in scripts/scripts.js.\n\n1. Call the plugin's runEager() function after the conditional import resolves\n2. Ensure this runs early in loadEager(), before loadLazy() is called\n3. This timing is critical to detect experiments and apply variant DOM changes before LCP\n4. Early execution minimizes layout shift and content flicker during variant swaps",
+      "title": "Integrate runExperimentation into loadEager function",
+      "description": "Add the experiment loader call into the loadEager() function in scripts/scripts.js.\n\n1. Add 'await runExperimentation(doc, experimentationConfig);' early in loadEager()\n2. Place it after existing early setup (decorateTemplatesAndThemes, etc.) but before loadHeader, loadFooter, and decorateBlocks calls\n3. This timing is critical — the plugin must run before LCP because it may swap page content\n4. This single call handles all experimentation detection and variant application\n5. There is NO separate loadLazy call needed in v2 — do not add one",
       "subtask_parent": "",
       "priority": "high",
       "assignee": "agent:system",
       "subtasks": []
     },
     {
-      "title": "Integrate showExperimentationOverlay into loadLazy function",
-      "description": "Add the experimentation debug overlay to the loadLazy() function in scripts/scripts.js.\n\n1. At the end of loadLazy(), call the plugin's lazy-phase function (showExperimentationOverlay)\n2. The overlay is a debug/authoring tool displaying active experiments and variants\n3. Overlay visibility is controlled by prodHost config - hidden on production, visible on non-prod origins\n4. Ensure the call is positioned after other lazy-loaded content to avoid blocking",
+      "title": "Add modulepreload to head.html",
+      "description": "Add a modulepreload link hint for the experiment loader in head.html.\n\n1. Add: <link rel=\"modulepreload\" href=\"/scripts/experiment-loader.js\" />\n2. Place it alongside existing modulepreload links (typically after the scripts/scripts.js preload)\n3. This tells the browser to start fetching the module early, reducing latency when the eager phase imports it\n4. Note: preload experiment-loader.js, NOT plugins/experimentation/src/index.js directly",
       "subtask_parent": "",
       "priority": "high",
       "assignee": "agent:system",
@@ -36,43 +44,43 @@
     },
     {
       "title": "Configure production hostname",
-      "description": "Set the experimentationConfig.prodHost value in scripts/scripts.js to match your production domain.\n\n1. Update prodHost to your production domain (e.g., 'www.mysite.com')\n2. This controls overlay visibility - debug pill is hidden on prod, shown on non-prod origins\n3. Alternative: Set isProd as a custom function if you have complex production detection logic\n4. Test that overlay appears on localhost/preview but not on the production domain",
+      "description": "Set the experimentationConfig.prodHost value in scripts/scripts.js to match your production domain.\n\n1. Update prodHost to your production domain (e.g., 'www.mysite.com')\n2. This controls overlay visibility — debug pill is hidden on prod, shown on non-prod origins\n3. Alternative: Set isProd as a custom function if you have complex production detection logic:\n   isProd: () => !window.location.hostname.endsWith('hlx.page') && window.location.hostname !== 'localhost'\n4. Test that overlay appears on localhost/preview but not on the production domain",
       "subtask_parent": "",
       "priority": "medium",
       "subtasks": []
     },
     {
       "title": "Define audience targeting functions",
-      "description": "Add custom audience functions to experimentationConfig.audiences for targeted experiments.\n\n1. Each audience is a named function returning a boolean\n2. Common audience examples:\n   - mobile: () => window.innerWidth < 600\n   - desktop: () => window.innerWidth >= 600\n   - logged-in: () => !!document.cookie.match(/auth=/)\n3. Audiences are referenced in page metadata with: Experiment Audience: mobile\n4. Multiple audiences can be combined for complex targeting scenarios",
+      "description": "Add custom audience functions to experimentationConfig.audiences for targeted experiments.\n\n1. Each audience is a named function returning a boolean\n2. Default audiences (mobile/desktop) are already included in the config template\n3. Add project-specific audiences as needed, e.g.:\n   - 'new-visitor': () => !localStorage.getItem('returning')\n   - us: async () => { const resp = await fetch('/geo-api'); const geo = await resp.json(); return geo.country === 'US'; }\n4. Keys must be kebab-case and match audience names used in page metadata\n5. Audiences are referenced in metadata with: Experiment Audience: mobile",
       "subtask_parent": "",
       "priority": "medium",
       "subtasks": []
     },
     {
-      "title": "Configure advanced options (optional)",
-      "description": "Review and configure optional plugin settings in experimentationConfig as needed.\n\n1. storage: Custom object for session/sample storage implementation\n2. decorationFunction: Custom DOM redecoration function for fragment experiments\n3. Meta tag prefixes (if custom naming needed):\n   - audiencesMetaTagPrefix\n   - campaignsMetaTagPrefix\n   - experimentsMetaTagPrefix\n4. Query parameter customization:\n   - audiencesQueryParameter\n   - campaignsQueryParameter\n   - experimentsQueryParameter",
-      "subtask_parent": "",
-      "priority": "low",
-      "subtasks": []
-    },
-    {
       "title": "Add RUM sampling configuration for experiment pages",
-      "description": "Add RUM sampling rate override in head.html for experiment pages.\n\n1. Add inline <script> block before the aem.js script load in head.html\n2. Script should check for experiment metadata on the page\n3. If experiment metadata is present, set window.RUM_SAMPLING_RATE = 10\n4. This increases sampling from 1-in-100 to 1-in-10 for better experiment data collection\n5. Critical for lower-traffic pages to ensure sufficient statistical significance",
+      "description": "Add RUM sampling rate override in head.html for experiment pages.\n\n1. Add inline <script> block BEFORE the aem.js script load in head.html\n2. Script should set window.RUM_SAMPLING_RATE using the same detection logic as experiment-loader.js:\n   - Check meta tags: [name^=\"experiment\"], [name^=\"campaign-\"], [name^=\"audience-\"]\n   - Check section-metadata divs for Experiment/Campaign/Audience text\n   - If detected: set rate to 10 (1-in-10), otherwise 100 (1-in-100)\n3. Verify aem.js has the line: const weight = new URLSearchParams(window.location.search).get('rum') === 'on' ? 1 : defaultSamplingRate;\n4. If that line is missing, apply changes from https://github.com/adobe/helix-rum-js/pull/159/files",
       "subtask_parent": "",
       "priority": "medium",
       "assignee": "agent:system",
       "subtasks": []
     },
     {
+      "title": "Configure advanced options (optional)",
+      "description": "Review and configure optional plugin settings in experimentationConfig as needed.\n\n1. storage: Custom storage backend (default: window.sessionStorage, use window.localStorage for cross-session persistence)\n2. decorationFunction: Custom DOM redecoration function for fragment experiments, e.g.:\n   decorationFunction: (el) => { buildBlock(el); decorateBlock(el); }\n3. Meta tag prefixes (if custom naming needed):\n   - audiencesMetaTagPrefix\n   - campaignsMetaTagPrefix\n   - experimentsMetaTagPrefix\n4. Query parameter customization:\n   - audiencesQueryParameter\n   - campaignsQueryParameter\n   - experimentsQueryParameter",
+      "subtask_parent": "",
+      "priority": "low",
+      "subtasks": []
+    },
+    {
       "title": "Configure consent management (optional)",
-      "description": "Integrate consent management platform (CMP) with experimentation if required.\n\n1. If using OneTrust, Cookiebot, or similar CMP, integrate consent gating\n2. Call the plugin's updateUserConsent(true) in your CMP callback when user grants tracking consent\n3. Add metadata to experiments requiring consent: Experiment Requires Consent: true\n4. Experiments with consent requirement will not activate until consent is granted\n5. Review your privacy policy requirements to determine which experiments need consent gating",
+      "description": "Integrate consent management platform (CMP) with experimentation if required.\n\n1. Import updateUserConsent and isUserConsentGiven from '../plugins/experimentation/src/index.js'\n2. Add consent initialization in experiment-loader.js (recommended) or scripts.js:\n   - OneTrust: Bridge OptanonWrapper callback to dispatch custom event, check for C0003/C0004 groups\n   - Cookiebot: Listen for CookiebotOnConsentReady and CookiebotOnAccept events\n   - Custom: Listen for consent-updated custom event\n3. Call updateUserConsent(true/false) in your CMP callback\n4. Add metadata to experiments requiring consent: Experiment Requires Consent: true\n5. Initialize consent BEFORE calling loadEager in experiment-loader.js",
       "subtask_parent": "",
       "priority": "low",
       "subtasks": []
     },
     {
       "title": "Commit instrumentation changes",
-      "description": "Stage and commit all plugin instrumentation changes to the feature branch.\n\n1. Stage modified files: scripts/scripts.js, head.html\n2. Commit with message: \"Instrument AEM Experimentation plugin\"\n3. Push to the plugin/aem-experimentation branch\n4. Ensure all changes follow project coding conventions",
+      "description": "Stage and commit all plugin instrumentation changes to the feature branch.\n\n1. Stage modified/new files: scripts/experiment-loader.js, scripts/scripts.js, head.html\n2. Commit with message: \"Instrument AEM Experimentation plugin\"\n3. Push to the plugin/aem-experimentation branch\n4. Ensure all changes follow project coding conventions",
       "subtask_parent": "",
       "priority": "high",
       "assignee": "agent:system",
